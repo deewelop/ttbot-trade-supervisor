@@ -1,0 +1,27 @@
+{
+  "name": "ttbot-trade-supervisor",
+  "version": "1.0.0",
+  "description": "just a trade supervisor",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Javad Gholizadeh",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deew-bots/ttbot-trade-supervisor.git"
+  },
+  "keywords": [
+    "algoritmic",
+    "trade"
+  ],
+  "bugs": {
+    "url": "https://github.com/deew-bots/ttbot-trade-supervisor/issues"
+  },
+  "homepage": "https://github.com/deew-bots/ttbot-trade-supervisor#readme",
+  "dependencies": {
+    "ccxt": "^4.1.98",
+    "node-telegram-bot-api": "^0.64.0"
+  }
+}
