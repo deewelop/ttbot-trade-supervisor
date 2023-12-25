@@ -1,14 +1,376 @@
 var ccxt = require('ccxt')
 const TELE = require('node-telegram-bot-api');
+const http = require('http');
+const fs = require('fs');
+const POS = require('./class.js');
+require('./configs.js');
 
-const token = '1346254020:AAEJDY_K3DJRwcZLhSAzEjwWbl6aW7QRwn8';
-const bot = new TELE(token, { polling: true });
-bot.sendMessage(235276411, 'heyyy');
 
-bot.on('message', (msg) => {
-    const chatId = msg.chat.id;
-    //bot.sendMessage(chatId, 'Hello World');
+//-- vars
+var __orders = [];
+var ex;
+
+//-- telegram
+const bot = new TELE(TELEGRAM_TOKEN, { polling: true });
+//bot.sendMessage(TELEGRAM_ID, 'heyyy');
+
+
+
+//-- listener
+const listener = http.createServer(async (req, res) =>
+{
+    res.writeHead(200, {'Content-Type': 'text/html'});
+    res.write(Buffer.from('<HTML><BODY>OK_ORDER_TAKED</BODY></HTML>', 'utf-8'));
+    res.end();
+
+    let path = req.url.split('/');
+    if (path[1] && path[1].includes(':'))
+    {
+        console.log(">> new request: " + req.url);
+        let cmds = path[1].split(':');
+
+        if (cmds[0] === 'DEBUG')
+        {
+            bot.sendMessage(_tele_id, cmds[1]);
+            console.log('[DEBUG]: ' + cmds[1] + ' !!\n');
+        }
+        else if (cmds[0] === 'TIMEOUT' && cmds[1] === 'TIMEOUT')
+        {
+            __orders.forEach((o) => (o.itsON = false));
+            bot.sendMessage(_tele_id, '<u>REPORT:</u> TIMEOUT called, ALL of positions CLOSED.');
+            console.log('[COMMAND]: ' + 'TIMEOUT Command, ALL of positions CLOSED !!!\n');
+        }
+        else if (cmds[1] === 'TIMEOUT')
+        {
+            __orders.forEach((o) =>
+            {
+                if (o.symbol === cmds[0])
+                    o.itsON = false;
+            });
+            bot.sendMessage(_tele_id, '<u>REPORT:</u> TIMEOUT called, Just ' + cmds[0] + ' CLOSED.');
+            console.log('[COMMAND]: ' + 'TIMEOUT Command, Its ' + cmds[0] + ' !!\n');
+        }
+        else if (__orders.length < MAX_POSITION && cmds[0].endsWith('USDT'))
+        {
+            let notThere = true;
+            __orders.forEach((o) =>
+            {
+                if (o.symbol === cmds[0] && o.LS === cmds[2])
+                    notThere = false;
+            });
+
+            if (notThere)
+            {
+                // NAME:FUTURE:LS:PRICE:ZARIB:TARGET:STOP:POWER:MARKET:NOLOSS:TRAIL:TEST:CANCEL
+                const me = new POS();
+                me.symbol = cmds[0];
+                me.itsFuture = cmds[1].toLowerCase() === "true";
+                me.LS = cmds[2];
+                me.enter = parseFloat(cmds[3]);
+                me.zarib = parseFloat(cmds[4]);
+                me.target = parseFloat(cmds[5]);
+                me.stop = parseFloat(cmds[6]);
+                me.power = parseFloat(cmds[7]);
+                me.market = cmds[8].toLowerCase() === "true";
+                me.noLoss = parseFloat(cmds[9]);
+                me.trail = parseFloat(cmds[10]);
+                me.itsTest = cmds[11].toLowerCase() === "true";
+                me.cancel = parseFloat(cmds[12]);
+                await setupOrder(me);
+            }
+            console.log('[COMMAND]: ' + 'OH, ORDER ' + cmds[2] + ', Its ' + cmds[0] + ' On ' + cmds[3] + ' ... ^^\n');
+        }
+    }
 });
+
+listener.listen(PORT, () =>
+{
+    console.log(`>> running at http://localhost:${PORT}/`);
+    
+    if(BROKER == "COINEX")
+    {
+        ex = new ccxt.coinex
+        ({
+            'apiKey': API_KEY,
+            'secret': API_SEC,
+            'options': {
+                'defaultType': 'swap',
+                'defaultMarginMode': 'isolated',
+            },
+        });
+    }
+    else if(BROKER == "MEXC")
+    {
+        ex = new ccxt.mexc
+        ({
+            'apiKey': API_KEY,
+            'secret': API_SEC,
+            'options': {
+                'defaultType': 'swap',
+                'defaultMarginMode': 'isolated',
+            },
+        });
+    }
+    
+});
+
+async function setupOrder(me)
+{
+    return new Promise(async (resolve) =>
+    {
+        __orders.push(me);
+
+        if (me.zarib > MAX_LEVERAGE)
+            me.zarib = MAX_LEVERAGE;
+
+        let wasOpen = false;
+        __orders.forEach((o) =>
+        {
+            if (o != me && o.symbol == me.symbol)
+            {
+                o.itsON = false;
+                wasOpen = true;
+            }
+        });
+        if (wasOpen)
+            await sleep(5000);
+
+        if (!me.itsON)
+        {
+            console.log("[COMMAND]: " + "Oops, Pos Removed before PLACE, Its " + me.symbol + " ... :||\n");
+            removeOrder(me);
+            return;
+        }
+
+        if (TEST_MODE)
+            me.itsTest = true;
+
+        me.size = SIZE * me.power * me.zarib;
+
+        let roundCount = 0;
+        if (me.size < 0.0001)
+            roundCount = 5;
+        else if (me.size < 0.001)
+            roundCount = 4;
+        else if (me.size < 0.01)
+            roundCount = 3;
+        else if (me.size < 0.1)
+            roundCount = 2;
+        else if (me.size < 1)
+            roundCount = 1;
+        me.QuDecimal = roundCount;
+
+        if (me.LS == "L")
+        {
+            me.side1 = "buy";
+            me.side2 = "sell";
+            me.emojiLS = "🐮";
+        }
+        else
+        {
+            me.side1 = "sell";
+            me.side2 = "buy";
+            me.emojiLS = "🐻";
+        }
+
+
+        let timer = setInterval(await handleOrder(me, timer), 1000);
+
+        let pR = 6 - me.enter.toString().Split('.')[0].length;
+        let txt = "<b>[LS]</b> #" + me.symbol + ", on <b>" + roundNumber(me.enter, pR) + "</b> ..." + me.emojiLS + "\n• TP " + roundNumber(me.target, pR) + ", SL " + roundNumber(me.stop, pR) + ", Lev x" + me.zarib;
+        txt = me.LS == "L" ? txt.replace("[LS]", "Buy") : txt.replace("[LS]", "Sell");
+        
+        console.log("[ORDER]: " + "OPEN, Its " + me.symbol + " ... :))\n");
+        bot.sendMessage(TELEGRAM_ID, txt);
+        
+
+        resolve('THE END');
+    });
+}
+
+async function handleOrder(me, timer)
+{
+    const tickers = await ex.fetchTickers ()
+    let now = tickers[me.symbol + '/USDT:USDT'].last;
+
+    if (me.enter2 == 0)
+    {
+        let cancel = Math.abs((now - me.cancel) / now * 100);
+        if(cancel <= 0.1)
+        {
+            console.log("[ORDER]: " + "Sorry, Cancel on Open POS, Its " + me.symbol + " ... :((");
+            bot.sendMessage(TELEGRAM_ID, "Cancel Opening #" + me.symbol);
+
+            clearInterval(timer);
+            removeOrder(me);
+        }
+
+        let ekhtelaf = Math.abs((now - me.enter) / now * 100);
+        if (!me.market || ekhtelaf <= 0.1)
+        {
+            let order_success = false;
+            let order_error = "";
+            let trys = 0;
+            if (!me.itsTest)
+            {
+                while (!order_success && trys < 5)
+                {
+                    if (me.itsFuture)
+                    {
+                        const leverage = await ex.setLeverage(me.zarib, me.symbol + '/USDT:USDT')
+                        console.log(leverage);
+                        const order = await ex.createOrder(me.symbol + '/USDT:USDT', 'market', me.side1, roundNumber(me.size, me.QuDecimal))
+                        console.log(order);
+
+                        order_success = true;
+                    }
+                    else
+                    {
+                       
+                    }
+
+                    trys++;
+                }
+            }
+            else
+                order_success = true;
+
+
+            if (order_success)
+            {
+                let msg = "[ORDER]: " + "POSITION, Its " + me.symbol + " ... :))\n";
+                console.log(msg);
+                bot.sendMessage(TELEGRAM_ID, msg);
+                me.enter2 = now;
+                me.bigest = me.enter2;
+            }
+            else
+            {
+                console.log("[ORDER]: " + "Sorry, Error on Open POS, Its " + me.symbol + " ... :((\nDetails: " + order_error + "\n");
+                bot.sendMessage(TELEGRAM_ID, "Error Opening #" + me.symbol + "\nError Details: " + order_error + " " + roundNumber(me.size, me.QuDecimal).toString());
+
+                clearInterval(timer);
+                removeOrder(me);
+            }
+
+        }
+    }
+    else
+    {
+        if (me.LS == "L")
+        {
+            if (now >= me.target)
+                me.itsON = false;
+
+            if (RISK_FREE && me.noLoss != 0 && now >= me.noLoss)
+                me.stop = me.enter2;
+
+            if (TRAILING && me.trail != 0 && now > me.bigest)
+            {
+                me.bigest = now;
+                me.stop = now - (now * me.trail / 100);
+            }
+
+            if (now <= me.stop)
+                me.itsON = false;
+        }
+        else
+        {
+            if (now <= me.target)
+                me.itsON = false;
+
+            if (RISK_FREE && me.noLoss != 0 && now <= me.noLoss)
+                me.stop = me.enter2;
+
+            if (TRAILING && me.trail != 0 && now < me.bigest)
+            {
+                me.bigest = now;
+                me.stop = now + (now * me.trail / 100);
+            }
+
+            if (now >= me.stop)
+                me.itsON = false;
+        }
+
+        let profit = (me.LS == "L") ? (now - me.enter2) / me.enter2 * 100 : (me.enter2 - now) / me.enter2 * 100;
+        me.profit = roundNumber(profit * me.zarib * me.power, 2);
+    }
+
+    if (me.itsON == false && me.itsOnCloseProcess == false)
+    {
+        me.itsOnCloseProcess = true;
+        clearInterval(timer);
+
+        if (!me.itsFuture)
+            me.size = me.size - (me.size * 0.001);
+
+        let ItsCloosed = true;
+        let err_count = 0;
+        while (ItsCloosed)
+        {
+
+            let close_success = false;
+            let close_error = "";
+            if (!me.itsTest)
+            {
+                try
+                {
+                    if (me.itsFuture)
+                    {
+                        const order = await ex.createOrder(me.symbol + '/USDT:USDT', 'market', me.side2, roundNumber(me.size, me.QuDecimal))
+                        console.log(order);
+
+                        close_success = true;
+                    }
+                    else
+                    {
+                        
+                    }
+                }
+                catch (e)
+                {
+                    close_error = e.message;
+                }
+            }
+            else
+                close_success = true;
+
+            let profitString = (me.profit >= 0) ? "+" + me.profit.toString() + "% 🟢" : me.profit.toString() + "% 🔴";
+            let txt = "<b>Close</b> #" + me.symbol + ", " + me.emojiLS + " <b>" + profitString + "</b>";
+
+            if (!close_success)
+            {
+                err_count++;
+                if (err_count > 3)
+                {
+                    bot.sendMessage(TELEGRAM_ID, txt + "<br>Close Error: " + close_error + "\n❌ its Emergency, Bot Cant Close Position, Close it FAST.");
+
+                    console.log("[ORDER]: " + "Sorry, Error on Close POS, Its " + me.symbol + " ... :((\nDetails: " + close_error + "\n");
+                    close_success = true;
+                }
+            }
+
+            if (close_success)
+            {
+                ItsCloosed = false;
+                removeOrder(me);
+
+                let pathSave = "DBOX/PROFIT/";
+                if (me.itsTest)
+                    pathSave = "DBOX/TESTNET/";
+                fs.writeFileSync(pathSave + new Date().getTime().toString(), me.profit.toString(), 'utf-8');
+                UpdateReport();
+
+                if (err_count <= 3)
+                {
+                    bot.sendMessage(TELEGRAM_ID, txt);
+                    console.log("[ORDER]: " + "CLOSE, Its " + me.symbol + " with " + profitString + " ... :))\n");
+                }
+            }
+        }
+    }
+    
+}
 
 async function main() {
 
@@ -50,11 +412,25 @@ async function main() {
     }
 
     try {
-        const order = await ex.createOrder('DOGE/USDT:USDT', 'market', 'sell', 100, 0)
+        //const order = await ex.createOrder('DOGE/USDT:USDT', 'market', 'sell', 100, 0)
         console.log(order)
     } catch (e) {
         console.log(e.constructor.name, e.message)
     }
 }
 
-main()
+//main()
+
+
+function removeOrder(o)
+{
+    var indx = __orders.indexOf(o);
+    if (indx !== -1) {
+        __orders.splice(indx, 1);
+    } 
+}
+
+function roundNumber(number, decimalPlaces) {
+    const multiplier = Math.pow(10, decimalPlaces);
+    return Math.round(number * multiplier) / multiplier;
+}
