@@ -12,32 +12,54 @@ var ex;
 
 //-- telegram
 const bot = new TELE(TELEGRAM_TOKEN, { polling: true });
-//bot.sendMessage(TELEGRAM_ID, 'heyyy');
+let m = bot.sendMessage(TELEGRAM_ID, 'heyyy', {parse_mode: 'HTML'})
+//.then(call => { call.message_id });
 
 
 
 //-- listener
 const listener = http.createServer(async (req, res) =>
 {
-    res.writeHead(200, {'Content-Type': 'text/html'});
-    res.write(Buffer.from('<HTML><BODY>OK_ORDER_TAKED</BODY></HTML>', 'utf-8'));
-    res.end();
-
+    res.writeHead(200, {'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept'});
     let path = req.url.split('/');
-    if (path[1] && path[1].includes(':'))
+
+    if(req.url === "/")
     {
+        fs.readFile('./controller.html', 'utf-8', (err, data) =>
+        {
+            if (!err)
+                res.end(data.replace('[SERVER_IP]', SERVER_IP).replace('[PORT]', PORT));
+        });
+    }
+    else if (req.url === '/CONTROLLER')
+    {
+        let resp = "OPENS";
+        console.log(__orders);
+        __orders.forEach((o) =>
+            {
+                let proff = o.enter2 == 0 ? "?" : (!o.profit.toString().includes('-') ? "+" + o.profit: o.profit) + "%";
+                resp += "/" + o.symbol + ":" + o.LS + ":" + (o.enter2==0?o.enter:o.enter2) + ":" + o.target + ":" + o.stop + ":" + o.itsTest.toString() + ":" + proff
+            });
+        res.write(Buffer.from(resp, 'utf-8'));
+        res.end();
+    }
+    else if (path[1] && path[1].includes(':'))
+    {
+        res.write(Buffer.from('<HTML><BODY>OK_ORDER_TAKED</BODY></HTML>', 'utf-8'));
+        res.end();
         console.log(">> new request: " + req.url);
+
         let cmds = path[1].split(':');
 
-        if (cmds[0] === 'DEBUG')
+         if (cmds[0] === 'DEBUG')
         {
-            bot.sendMessage(_tele_id, cmds[1]);
+            bot.sendMessage(_tele_id, cmds[1], {parse_mode: 'HTML'});
             console.log('[DEBUG]: ' + cmds[1] + ' !!\n');
         }
         else if (cmds[0] === 'TIMEOUT' && cmds[1] === 'TIMEOUT')
         {
             __orders.forEach((o) => (o.itsON = false));
-            bot.sendMessage(_tele_id, '<u>REPORT:</u> TIMEOUT called, ALL of positions CLOSED.');
+            bot.sendMessage(_tele_id, '<u>REPORT:</u> TIMEOUT called, ALL of positions CLOSED.', {parse_mode: 'HTML'});
             console.log('[COMMAND]: ' + 'TIMEOUT Command, ALL of positions CLOSED !!!\n');
         }
         else if (cmds[1] === 'TIMEOUT')
@@ -47,10 +69,10 @@ const listener = http.createServer(async (req, res) =>
                 if (o.symbol === cmds[0])
                     o.itsON = false;
             });
-            bot.sendMessage(_tele_id, '<u>REPORT:</u> TIMEOUT called, Just ' + cmds[0] + ' CLOSED.');
+            bot.sendMessage(_tele_id, '<u>REPORT:</u> TIMEOUT called, Just ' + cmds[0] + ' CLOSED.', {parse_mode: 'HTML'});
             console.log('[COMMAND]: ' + 'TIMEOUT Command, Its ' + cmds[0] + ' !!\n');
         }
-        else if (__orders.length < MAX_POSITION && cmds[0].endsWith('USDT'))
+        else if (__orders.length < MAX_POSITION)
         {
             let notThere = true;
             __orders.forEach((o) =>
@@ -63,6 +85,7 @@ const listener = http.createServer(async (req, res) =>
             {
                 // NAME:FUTURE:LS:PRICE:ZARIB:TARGET:STOP:POWER:MARKET:NOLOSS:TRAIL:TEST:CANCEL
                 const me = new POS();
+                me.text = path[1];
                 me.symbol = cmds[0];
                 me.itsFuture = cmds[1].toLowerCase() === "true";
                 me.LS = cmds[2];
@@ -83,7 +106,7 @@ const listener = http.createServer(async (req, res) =>
     }
 });
 
-listener.listen(PORT, () =>
+listener.listen(PORT, async () =>
 {
     console.log(`>> running at http://localhost:${PORT}/`);
     
@@ -111,7 +134,21 @@ listener.listen(PORT, () =>
             },
         });
     }
+    else if(BROKER == "BINGX")
+    {
+        ex = new ccxt.bingx({
+            'apiKey': API_KEY,
+            'secret': API_SEC,
+            'options': {
+                'defaultType': 'margin',
+                'defaultMarginMode': 'isolated',
+            },
+        })
+    }
+
     
+    const balance = await ex.fetchBalance()
+    console.log(balance);
 });
 
 async function setupOrder(me)
@@ -145,7 +182,7 @@ async function setupOrder(me)
         if (TEST_MODE)
             me.itsTest = true;
 
-        me.size = SIZE * me.power * me.zarib;
+        me.size = SIZE * me.power * me.zarib / me.enter;
 
         let roundCount = 0;
         if (me.size < 0.0001)
@@ -174,202 +211,216 @@ async function setupOrder(me)
         }
 
 
-        let timer = setInterval(await handleOrder(me, timer), 1000);
+        await handleOrder(me);
 
         let pR = 6 - me.enter.toString().Split('.')[0].length;
         let txt = "<b>[LS]</b> #" + me.symbol + ", on <b>" + roundNumber(me.enter, pR) + "</b> ..." + me.emojiLS + "\n• TP " + roundNumber(me.target, pR) + ", SL " + roundNumber(me.stop, pR) + ", Lev x" + me.zarib;
         txt = me.LS == "L" ? txt.replace("[LS]", "Buy") : txt.replace("[LS]", "Sell");
         
         console.log("[ORDER]: " + "OPEN, Its " + me.symbol + " ... :))\n");
-        bot.sendMessage(TELEGRAM_ID, txt);
+        bot.sendMessage(TELEGRAM_ID, txt, {parse_mode: 'HTML'})
+        .then(call => { me.messageId = call.message_id });
         
 
-        resolve('THE END');
+        //resolve('THE END');
     });
 }
 
-async function handleOrder(me, timer)
+async function handleOrder(me)
 {
-    const tickers = await ex.fetchTickers ()
-    let now = tickers[me.symbol + '/USDT:USDT'].last;
-
-    if (me.enter2 == 0)
+    while(true)
     {
-        let cancel = Math.abs((now - me.cancel) / now * 100);
-        if(cancel <= 0.1)
+        const tickers = await ex.fetchTickers ();
+        let now = tickers[me.symbol + '/USDT:USDT'].last;
+        console.log(now);
+
+        if (me.enter2 == 0)
         {
-            console.log("[ORDER]: " + "Sorry, Cancel on Open POS, Its " + me.symbol + " ... :((");
-            bot.sendMessage(TELEGRAM_ID, "Cancel Opening #" + me.symbol);
-
-            clearInterval(timer);
-            removeOrder(me);
-        }
-
-        let ekhtelaf = Math.abs((now - me.enter) / now * 100);
-        if (!me.market || ekhtelaf <= 0.1)
-        {
-            let order_success = false;
-            let order_error = "";
-            let trys = 0;
-            if (!me.itsTest)
+            let cancel = Math.abs((now - me.cancel) / now * 100);
+            if(cancel <= 0.1)
             {
-                while (!order_success && trys < 5)
-                {
-                    if (me.itsFuture)
-                    {
-                        const leverage = await ex.setLeverage(me.zarib, me.symbol + '/USDT:USDT')
-                        console.log(leverage);
-                        const order = await ex.createOrder(me.symbol + '/USDT:USDT', 'market', me.side1, roundNumber(me.size, me.QuDecimal))
-                        console.log(order);
+                console.log("[ORDER]: " + "Sorry, Cancel on Open POS, Its " + me.symbol + " ... :((");
+                bot.sendMessage(TELEGRAM_ID, "Cancel Opening #" + me.symbol, {parse_mode: 'HTML', reply_to_message_id: me.messageId});
 
-                        order_success = true;
-                    }
-                    else
-                    {
-                       
-                    }
-
-                    trys++;
-                }
-            }
-            else
-                order_success = true;
-
-
-            if (order_success)
-            {
-                let msg = "[ORDER]: " + "POSITION, Its " + me.symbol + " ... :))\n";
-                console.log(msg);
-                bot.sendMessage(TELEGRAM_ID, msg);
-                me.enter2 = now;
-                me.bigest = me.enter2;
-            }
-            else
-            {
-                console.log("[ORDER]: " + "Sorry, Error on Open POS, Its " + me.symbol + " ... :((\nDetails: " + order_error + "\n");
-                bot.sendMessage(TELEGRAM_ID, "Error Opening #" + me.symbol + "\nError Details: " + order_error + " " + roundNumber(me.size, me.QuDecimal).toString());
-
-                clearInterval(timer);
+                //clearInterval(timer);
                 removeOrder(me);
+                break;
             }
 
-        }
-    }
-    else
-    {
-        if (me.LS == "L")
-        {
-            if (now >= me.target)
-                me.itsON = false;
-
-            if (RISK_FREE && me.noLoss != 0 && now >= me.noLoss)
-                me.stop = me.enter2;
-
-            if (TRAILING && me.trail != 0 && now > me.bigest)
+            let ekhtelaf = Math.abs((now - me.enter) / now * 100);
+            if (!me.market || ekhtelaf <= 0.1)
             {
-                me.bigest = now;
-                me.stop = now - (now * me.trail / 100);
-            }
+                let order_success = false;
+                let order_error = "";
+                let trys = 0;
+                if (!me.itsTest)
+                {
+                    while (!order_success && trys < 5)
+                    {
+                        if (me.itsFuture)
+                        {
+                            //const leverage = await ex.setLeverage(me.zarib, me.symbol + '/USDT:USDT', {side: (me.side1=="buy"?"LONG":"SHORT")});
+                            //console.log(leverage);
+                            const leverage1 = await ex.setLeverage(me.zarib, me.symbol + '/USDT:USDT', {side: "LONG"});
+                            console.log(leverage1);
+                            const leverage2 = await ex.setLeverage(me.zarib, me.symbol + '/USDT:USDT', {side: "SHORT"});
+                            console.log(leverage2);
+                            const order = await ex.createOrder(me.symbol + '/USDT:USDT', 'market', me.side1, roundNumber(me.size, me.QuDecimal))
+                            console.log(order);
 
-            if (now <= me.stop)
-                me.itsON = false;
+                            order_success = true;
+                        }
+                        else
+                        {
+                        
+                        }
+
+                        trys++;
+                    }
+                }
+                else
+                    order_success = true;
+
+
+                if (order_success)
+                {
+                    let msg = "[ORDER]: " + "POSITION, Its " + me.symbol + " ... :))\n";
+                    console.log(msg);
+                    bot.sendMessage(TELEGRAM_ID, msg, {parse_mode: 'HTML', reply_to_message_id: me.messageId});
+                    me.enter2 = now;
+                    me.bigest = me.enter2;
+                }
+                else
+                {
+                    console.log("[ORDER]: " + "Sorry, Error on Open POS, Its " + me.symbol + " ... :((\nDetails: " + order_error + "\n");
+                    bot.sendMessage(TELEGRAM_ID, "Error Opening #" + me.symbol + "\nError Details: " + order_error + " " + roundNumber(me.size, me.QuDecimal).toString(), {parse_mode: 'HTML', reply_to_message_id: me.messageId});
+
+                    //clearInterval(timer);
+                    removeOrder(me);
+                    break;
+                }
+
+            }
         }
         else
         {
-            if (now <= me.target)
-                me.itsON = false;
-
-            if (RISK_FREE && me.noLoss != 0 && now <= me.noLoss)
-                me.stop = me.enter2;
-
-            if (TRAILING && me.trail != 0 && now < me.bigest)
+            if (me.LS == "L")
             {
-                me.bigest = now;
-                me.stop = now + (now * me.trail / 100);
-            }
+                if (now >= me.target)
+                    me.itsON = false;
 
-            if (now >= me.stop)
-                me.itsON = false;
-        }
+                if (RISK_FREE && me.noLoss != 0 && now >= me.noLoss)
+                    me.stop = me.enter2;
 
-        let profit = (me.LS == "L") ? (now - me.enter2) / me.enter2 * 100 : (me.enter2 - now) / me.enter2 * 100;
-        me.profit = roundNumber(profit * me.zarib * me.power, 2);
-    }
-
-    if (me.itsON == false && me.itsOnCloseProcess == false)
-    {
-        me.itsOnCloseProcess = true;
-        clearInterval(timer);
-
-        if (!me.itsFuture)
-            me.size = me.size - (me.size * 0.001);
-
-        let ItsCloosed = true;
-        let err_count = 0;
-        while (ItsCloosed)
-        {
-
-            let close_success = false;
-            let close_error = "";
-            if (!me.itsTest)
-            {
-                try
+                if (TRAILING && me.trail != 0 && now > me.bigest)
                 {
-                    if (me.itsFuture)
-                    {
-                        const order = await ex.createOrder(me.symbol + '/USDT:USDT', 'market', me.side2, roundNumber(me.size, me.QuDecimal))
-                        console.log(order);
+                    me.bigest = now;
+                    me.stop = now - (now * me.trail / 100);
+                }
 
-                        close_success = true;
-                    }
-                    else
-                    {
-                        
-                    }
-                }
-                catch (e)
-                {
-                    close_error = e.message;
-                }
+                if (now <= me.stop)
+                    me.itsON = false;
             }
             else
-                close_success = true;
-
-            let profitString = (me.profit >= 0) ? "+" + me.profit.toString() + "% 🟢" : me.profit.toString() + "% 🔴";
-            let txt = "<b>Close</b> #" + me.symbol + ", " + me.emojiLS + " <b>" + profitString + "</b>";
-
-            if (!close_success)
             {
-                err_count++;
-                if (err_count > 3)
-                {
-                    bot.sendMessage(TELEGRAM_ID, txt + "<br>Close Error: " + close_error + "\n❌ its Emergency, Bot Cant Close Position, Close it FAST.");
+                if (now <= me.target)
+                    me.itsON = false;
 
-                    console.log("[ORDER]: " + "Sorry, Error on Close POS, Its " + me.symbol + " ... :((\nDetails: " + close_error + "\n");
-                    close_success = true;
+                if (RISK_FREE && me.noLoss != 0 && now <= me.noLoss)
+                    me.stop = me.enter2;
+
+                if (TRAILING && me.trail != 0 && now < me.bigest)
+                {
+                    me.bigest = now;
+                    me.stop = now + (now * me.trail / 100);
                 }
+
+                if (now >= me.stop)
+                    me.itsON = false;
             }
 
-            if (close_success)
-            {
-                ItsCloosed = false;
-                removeOrder(me);
-
-                let pathSave = "DBOX/PROFIT/";
-                if (me.itsTest)
-                    pathSave = "DBOX/TESTNET/";
-                fs.writeFileSync(pathSave + new Date().getTime().toString(), me.profit.toString(), 'utf-8');
-                UpdateReport();
-
-                if (err_count <= 3)
-                {
-                    bot.sendMessage(TELEGRAM_ID, txt);
-                    console.log("[ORDER]: " + "CLOSE, Its " + me.symbol + " with " + profitString + " ... :))\n");
-                }
-            }
+            let profit = (me.LS == "L") ? (now - me.enter2) / me.enter2 * 100 : (me.enter2 - now) / me.enter2 * 100;
+            me.profit = roundNumber(profit * me.zarib * me.power, 2);
         }
+
+        if (me.itsON == false && me.itsOnCloseProcess == false)
+        {
+            me.itsOnCloseProcess = true;
+            //clearInterval(timer);
+
+            if (!me.itsFuture)
+                me.size = me.size - (me.size * 0.001);
+
+            let ItsCloosed = true;
+            let err_count = 0;
+            while (ItsCloosed)
+            {
+
+                let close_success = false;
+                let close_error = "";
+                if (!me.itsTest)
+                {
+                    try
+                    {
+                        if (me.itsFuture)
+                        {
+                            const order = await ex.createOrder(me.symbol + '/USDT:USDT', 'market', me.side2, roundNumber(me.size, me.QuDecimal), 0, {'reduce_only':true})
+                            console.log(order);
+
+                            close_success = true;
+                        }
+                        else
+                        {
+                            
+                        }
+                    }
+                    catch (e)
+                    {
+                        close_error = e.message;
+                    }
+                }
+                else
+                    close_success = true;
+
+                let profitString = (me.profit >= 0) ? "+" + me.profit.toString() + "% 🟢" : me.profit.toString() + "% 🔴";
+                let txt = "<b>Close</b> #" + me.symbol + ", " + me.emojiLS + " <b>" + profitString + "</b>";
+
+                if (!close_success)
+                {
+                    err_count++;
+                    if (err_count > 3)
+                    {
+                        bot.sendMessage(TELEGRAM_ID, txt + "<br>Close Error: " + close_error + "\n❌ its Emergency, Bot Cant Close Position, Close it FAST.", {parse_mode: 'HTML', reply_to_message_id: me.messageId});
+
+                        console.log("[ORDER]: " + "Sorry, Error on Close POS, Its " + me.symbol + " ... :((\nDetails: " + close_error + "\n");
+                        close_success = true;
+                    }
+                }
+
+                if (close_success)
+                {
+                    ItsCloosed = false;
+                    removeOrder(me);
+
+                    let pathSave = "DBOX/PROFIT/";
+                    if (me.itsTest)
+                        pathSave = "DBOX/TESTNET/";
+                    fs.writeFileSync(pathSave + new Date().getTime().toString(), me.text + ":" + me.profit.toString(), 'utf-8');
+                    //UpdateReport();
+
+                    if (err_count <= 3)
+                    {
+                        bot.sendMessage(TELEGRAM_ID, txt, {parse_mode: 'HTML', reply_to_message_id: me.messageId});
+                        console.log("[ORDER]: " + "CLOSE, Its " + me.symbol + " with " + profitString + " ... :))\n");
+                    }
+                }
+            }
+            
+            break;
+        }
+
+        //await sleep(1000);
     }
-    
 }
 
 async function main() {

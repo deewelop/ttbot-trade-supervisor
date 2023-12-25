@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body
+    {
+      background-color: rgb(23, 25, 26);
+      color: white;
+      font-family: "Comic Sans MS", "Comic Sans", cursive;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+    }
+
+    #box-father
+    {
+      position: relative;
+      height: auto;
+    }
+
+    #box-1, #box-2
+    {
+      height: 600px;
+      width: 400px;
+      box-sizing: border-box;
+      float: left;
+      padding: 10px;
+    }
+
+    #box-1
+    {
+      
+    }
+
+    #box-2
+    {
+      
+    }
+
+    @media  (max-width: 600px)
+    {
+      #box-1, #box-2
+      {
+        width: 100%;
+      }
+      #box-2
+      {
+        margin-top: 10px;
+      }
+      #box-father
+      {
+        width: 100%;
+      }
+      body
+      {
+        height: auto;
+      }
+    }
+
+    @media  (min-width: 600px)
+    {
+      #box-1, #box-2
+      {
+        width: 400px;
+      }
+      #box-father
+      {
+        width: auto;
+      }
+      body
+      {
+        height: 100vh;
+      }
+    }
+
+
+
+    #box-opens
+    {
+      width: 100%;
+      text-align: center;
+      border: 1px solid rgb(84, 91, 94);
+      border-radius: 5px;
+      height: 300px;
+    }
+    #table-opens
+    {
+      width: 100%;
+    }
+
+    #box-hittory
+    {
+      width: 100%;
+      text-align: center;
+      border: 1px solid rgb(84, 91, 94);
+      border-radius: 5px;
+      height: 230px;
+
+      margin-top: 10px;
+    }
+    #table-hittory
+    {
+      width: 100%;
+    }
+
+    #box-filter
+    {
+      width: 100%;
+      text-align: center;
+      border: 1px solid rgb(84, 91, 94);
+      border-radius: 5px;
+      height: 40px;
+
+      margin-top: 10px;
+    }
+
+    #box-report
+    {
+      width: 100%;
+      text-align: center;
+      border: 1px solid rgb(84, 91, 94);
+      border-radius: 5px;
+      height: 80px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="box-father">
+  <div id="box-1">
+    <div id="box-opens">
+      <table id="table-opens">
+        <tr>
+          <th>Name</th>
+          <th>L/S</th>
+          <th>Enter</th>
+          <th>Target</th>
+          <th>Stop</th>
+          <th>Demo</th>
+          <th>Profit</th>
+        </tr>
+        <tr>
+          <td>BTC</td>
+          <td>L</td>
+          <td>35500</td>
+          <td>37500</td>
+          <td>33500</td>
+          <td>False</td>
+          <td>+143.5%</td>
+        </tr>
+        <tr>
+          <td>BNB</td>
+          <td>S</td>
+          <td>240</td>
+          <td>255</td>
+          <td>235</td>
+          <td>True</td>
+          <td>-56.8%</td>
+        </tr>
+      </table>
+    </div>
+    <div id="box-filter">
+    </div>
+    <div id="box-hittory">
+      <table id="table-hittory">
+        <tr>
+          <th>Name</th>
+          <th>L/S</th>
+          <th>Enter</th>
+          <th>Target</th>
+          <th>Stop</th>
+          <th>Demo</th>
+          <th>Profit</th>
+        </tr>
+        <tr>
+          <td>BTC</td>
+          <td>L</td>
+          <td>35500</td>
+          <td>37500</td>
+          <td>33500</td>
+          <td>False</td>
+          <td>+143.5%</td>
+        </tr>
+        <tr>
+          <td>BNB</td>
+          <td>S</td>
+          <td>240</td>
+          <td>255</td>
+          <td>235</td>
+          <td>True</td>
+          <td>-56.8%</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+  <div id="box-2">
+    <div id="box-report">
+    </div>
+  </div>
+</div>
+
+<script>
+  var xhr = new XMLHttpRequest();
+
+  LoadController();
+  setInterval(() =>
+  {
+    LoadController();
+  }, 1000);
+
+  function LoadController()
+  {
+    xhr.open('GET', 'http://[SERVER_IP]:[PORT]/CONTROLLER', true);
+    xhr.onreadystatechange = function ()
+    {
+      if (xhr.readyState === 4 && xhr.status >= 200)
+      {
+        //alert(xhr.responseText);
+
+        let opens = document.getElementById("table-opens").children[0];
+        opens.innerHTML = "<tr><th>Name</th><th>L/S</th><th>Enter</th><th>Target</th><th>Stop</th><th>Demo</th><th>Profit</t</tr>";
+          
+        let arr = xhr.responseText.split("/");
+        for (let i = 1; i < arr.length; i++)
+        {
+          let ele = document.createElement("tr");
+          let arr2 = arr[i].split(':');
+          for (let j = 0; j < arr2.length; j++)
+          {
+            let ele2 = document.createElement("td");
+            ele2.innerText = arr2[j];
+            ele.append(ele2);
+          }
+          opens.append(ele);
+        }
+      }
+    };
+    xhr.send();
+  }
+
+</script>
+</body>
+</html>

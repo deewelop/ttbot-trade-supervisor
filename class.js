@@ -25,6 +25,8 @@ class POS
         this.side1 = 0;
         this.side2 = 0;
         this.emojiLS = "";
+        this.messageId = 0
+        this.text = ""
     }
 }
 
